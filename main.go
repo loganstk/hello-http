@@ -35,7 +35,7 @@ func main() {
 	switch os.Args[1] {
 	case "publisher":
 		slog.Info("Starting HTTP server...")
-		http.HandleFunc("POST /vendor/{vendorId}/point", handler.PostHandler(nc))
+		http.HandleFunc("POST /vendor/{vendorId}/point", handler.HandleHttpPost(nc))
 		http.ListenAndServe(":8080", nil)
 	case "consumer":
 		slog.Info("Starting NATS stream consumer...")
@@ -45,22 +45,18 @@ func main() {
 		js, _ := jetstream.New(nc)
 
 		str, _ := js.CreateStream(ctx, jetstream.StreamConfig{
-			Name:     "points",
-			Subjects: []string{"msg.points"},
+			Name:     "TARGETS",
+			Subjects: []string{"msg.targets"},
 		})
 
 		mongo, _ := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONGODB_URL")))
 
 		cons, _ := str.CreateConsumer(ctx, jetstream.ConsumerConfig{
-			Durable:   "points",
+			Durable:   "targets",
 			AckPolicy: jetstream.AckExplicitPolicy,
 		})
 
-		cc, err := cons.Consume(handler.HandlePointMessage(mongo))
-
-		if err != nil {
-			slog.Error("Error creating NATS stream consumer", err)
-		}
+		cc, _ := cons.Consume(handler.HandleTargetMessage(mongo))
 
 		select {
 		case <-ctx.Done():

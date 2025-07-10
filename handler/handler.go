@@ -26,15 +26,23 @@ type ErrResponse struct {
 	Message string
 }
 
-func PostHandler(nc *nats.Conn) func(http.ResponseWriter, *http.Request) {
+type Target struct {
+	Vendor    string
+	Timestamp time.Time
+	Point     geojson.Feature
+}
+
+func HandleHttpPost(nc *nats.Conn) func(http.ResponseWriter, *http.Request) {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		slog.Info("Received /vendor/{vendorId} POST request", "vendorId", request.PathValue("vendorId"))
+		vendorId := request.PathValue("vendorId")
+		slog.Info("Received /vendor/{vendorId}/point POST request", "vendorId", vendorId)
 
 		defer request.Body.Close()
 		body, _ := io.ReadAll(request.Body)
 		slog.Info("Processing request body", "body", string(body))
 
-		fc, err := validateAndParse(body)
+		f, err := validateAndParseFeature(body)
+		slog.Info("Received feature", "type", f.Type, "geometry", f.Geometry, "props", f.Properties)
 
 		if err != nil {
 			http.ResponseWriter.WriteHeader(writer, http.StatusBadRequest)
@@ -50,30 +58,34 @@ func PostHandler(nc *nats.Conn) func(http.ResponseWriter, *http.Request) {
 			return
 		}
 
-		msg := nats.NewMsg("msg.points")
-		msg.Header.Add("Nats-Msg-Id", uuid.NewString())
-		msg.Data = body
-		nc.PublishMsg(msg)
-
-		for _, f := range fc.Features {
-			slog.Info("Received feature", "type", f.Type, "geometry", f.Geometry, "props", f.Properties)
+		target := Target{
+			Point:     *f,
+			Timestamp: time.Now(),
+			Vendor:    vendorId,
 		}
 
+		data, _ := json.Marshal(target)
+
+		msg := nats.NewMsg("msg.targets")
+		msg.Header.Add("Nats-Msg-Id", uuid.NewString())
+		msg.Data = data
+		nc.PublishMsg(msg)
+
 		encoder := json.NewEncoder(writer)
-		encoder.Encode(fc)
+		encoder.Encode(target)
 	}
 }
 
-func HandlePointMessage(mongo *mongo.Client) func(jetstream.Msg) {
+func HandleTargetMessage(mongo *mongo.Client) func(jetstream.Msg) {
 	return func(msg jetstream.Msg) {
 		msgId := msg.Headers().Get("Nats-Msg-Id")
 		slog.Info("Received a message from NATS stream", "ID", msgId)
 
-		pointsCollection := mongo.Database("helloHttp").Collection("points")
+		pointsCollection := mongo.Database("helloHttp").Collection("targets")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		fc, err := validateAndParse(msg.Data())
+		t, err := validateAndParseTarget(msg.Data())
 
 		if err != nil {
 			slog.Error("Failed to parse GeoJSON message from stream", "ID", msgId, "message", string(msg.Data()))
@@ -81,9 +93,9 @@ func HandlePointMessage(mongo *mongo.Client) func(jetstream.Msg) {
 			return
 		}
 
-		res, err := pointsCollection.InsertOne(ctx, fc)
+		res, err := pointsCollection.InsertOne(ctx, t)
 		if err != nil {
-			slog.Error("Failed to save the point to the database", err)
+			slog.Error("Failed to save target to the database", err)
 			msg.Nak()
 			return
 		}
@@ -93,12 +105,25 @@ func HandlePointMessage(mongo *mongo.Client) func(jetstream.Msg) {
 	}
 }
 
-func validateAndParse(data []byte) (*geojson.FeatureCollection, error) {
-	fc, err := geojson.UnmarshalFeatureCollection(data)
+func validateAndParseTarget(data []byte) (*Target, error) {
+	target := &Target{}
+	err := json.Unmarshal(data, &target)
+
+	if err != nil {
+		slog.Error("Error parsing Target", "error", err, "string", string(data))
+	}
+
+	return target, err
+}
+
+func validateAndParseFeature(data []byte) (*geojson.Feature, error) {
+	f, err := geojson.UnmarshalFeature(data)
+
+	// TODO: validate coordinates
 
 	if err != nil {
 		slog.Error("Error parsing GeoJSON", "error", err, "string", string(data))
 	}
 
-	return fc, err
+	return f, err
 }
