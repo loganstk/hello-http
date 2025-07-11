@@ -28,13 +28,15 @@ func main() {
 		slog.Error("Error connecting to NATS server", "NATS_URL", os.Getenv("NATS_URL"))
 		return
 	}
-
 	defer nc.Drain()
+
+	mongo, _ := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONGODB_URL")))
 
 	switch os.Args[1] {
 	case "publisher":
 		slog.Info("Starting HTTP server...")
-		http.HandleFunc("POST /vendor/{vendorId}/point", handler.HandleHttpPost(nc))
+		http.HandleFunc("POST /vendor/{vendorId}/point", handler.HandlePostPoint(nc))
+		http.HandleFunc("GET /vendor/{vendorId}/point", handler.HandleGetPoints(mongo))
 		http.ListenAndServe(":8080", nil)
 	case "consumer":
 		slog.Info("Starting NATS stream consumer...")
@@ -47,8 +49,6 @@ func main() {
 			Name:     "TARGETS",
 			Subjects: []string{"msg.targets"},
 		})
-
-		mongo, _ := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONGODB_URL")))
 
 		cons, _ := str.CreateConsumer(ctx, jetstream.ConsumerConfig{
 			Durable:   "TARGETS",

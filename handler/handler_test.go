@@ -27,7 +27,7 @@ func TestPostHandler_OK(t *testing.T) {
 	rr := httptest.NewRecorder()
 	ja := jsonassert.New(t)
 
-	HandleHttpPost(rr, req)
+	HandlePostPoint(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -43,7 +43,7 @@ func TestPostHandler_BadRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 	ja := jsonassert.New(t)
 
-	HandleHttpPost(rr, req)
+	HandlePostPoint(rr, req)
 
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)

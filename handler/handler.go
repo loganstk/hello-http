@@ -7,10 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/nats-io/nats.go"
@@ -20,7 +22,9 @@ import (
 )
 
 const (
-	ErrInvalidJson = 1000
+	ErrInvalidJson   = 1000
+	ErrWrongGeometry = 1001
+	ErrInvalidCoords = 1002
 )
 
 type ErrResponse struct {
@@ -29,14 +33,14 @@ type ErrResponse struct {
 }
 
 type Target struct {
-	Vendor    string
+	Vendor    int
 	Timestamp time.Time
 	Point     geojson.Feature
 }
 
-func HandleHttpPost(nc *nats.Conn) func(http.ResponseWriter, *http.Request) {
+func HandlePostPoint(nc *nats.Conn) func(http.ResponseWriter, *http.Request) {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		vendorId := request.PathValue("vendorId")
+		vendorId, _ := strconv.Atoi(request.PathValue("vendorId"))
 		slog.Info("Received /vendor/{vendorId}/point POST request", "vendorId", vendorId)
 
 		defer request.Body.Close()
@@ -75,6 +79,37 @@ func HandleHttpPost(nc *nats.Conn) func(http.ResponseWriter, *http.Request) {
 
 		encoder := json.NewEncoder(writer)
 		encoder.Encode(target)
+	}
+}
+
+func HandleGetPoints(mongo *mongo.Client) func(http.ResponseWriter, *http.Request) {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		vendorId, err := strconv.Atoi(request.PathValue("vendorId"))
+
+		if err != nil {
+			slog.Error("Incorrect vendorId path value", "vendorId", request.PathValue("vendorId"))
+			
+		}
+
+		slog.Info("Received /vendor/{vendorId}/point GET request", "vendorId", vendorId)
+
+		ctx, _ := context.WithCancel(context.Background())
+		filter := bson.D{{"vendor", vendorId}}
+
+		cursor, err := mongo.Database("helloHttp").Collection("targets").Find(ctx, filter)
+
+		if err != nil {
+
+		}
+
+		var targets []Target
+		for cursor.Next(ctx) {
+			var res Target
+			cursor.Decode(&res)
+			targets = append(targets, res)
+		}
+
+		json.NewEncoder(writer).Encode(targets)
 	}
 }
 
