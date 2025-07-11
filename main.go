@@ -52,7 +52,7 @@ func main() {
 		mongo, _ := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONGODB_URL")))
 
 		cons, _ := str.CreateConsumer(ctx, jetstream.ConsumerConfig{
-			Durable:   "targets",
+			Durable:   "TARGETS",
 			AckPolicy: jetstream.AckExplicitPolicy,
 		})
 

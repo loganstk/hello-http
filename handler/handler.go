@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geojson"
 )
 
@@ -41,7 +43,7 @@ func HandleHttpPost(nc *nats.Conn) func(http.ResponseWriter, *http.Request) {
 		body, _ := io.ReadAll(request.Body)
 		slog.Info("Processing request body", "body", string(body))
 
-		f, err := validateAndParseFeature(body)
+		f, err := parseFeature(body)
 		slog.Info("Received feature", "type", f.Type, "geometry", f.Geometry, "props", f.Properties)
 
 		if err != nil {
@@ -85,7 +87,7 @@ func HandleTargetMessage(mongo *mongo.Client) func(jetstream.Msg) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		t, err := validateAndParseTarget(msg.Data())
+		t, err := parseTarget(msg.Data())
 
 		if err != nil {
 			slog.Error("Failed to parse GeoJSON message from stream", "ID", msgId, "message", string(msg.Data()))
@@ -105,7 +107,7 @@ func HandleTargetMessage(mongo *mongo.Client) func(jetstream.Msg) {
 	}
 }
 
-func validateAndParseTarget(data []byte) (*Target, error) {
+func parseTarget(data []byte) (*Target, error) {
 	target := &Target{}
 	err := json.Unmarshal(data, &target)
 
@@ -113,17 +115,34 @@ func validateAndParseTarget(data []byte) (*Target, error) {
 		slog.Error("Error parsing Target", "error", err, "string", string(data))
 	}
 
-	return target, err
+	return target, nil
 }
 
-func validateAndParseFeature(data []byte) (*geojson.Feature, error) {
+func parseFeature(data []byte) (*geojson.Feature, error) {
 	f, err := geojson.UnmarshalFeature(data)
-
-	// TODO: validate coordinates
 
 	if err != nil {
 		slog.Error("Error parsing GeoJSON", "error", err, "string", string(data))
+		return f, err
 	}
 
-	return f, err
+	if p, ok := f.Geometry.(orb.Point); ok {
+		return f, validatePoint(&p)
+	} else {
+		return f, errors.New("geometry is not a point")
+	}
+}
+
+func validatePoint(p *orb.Point) error {
+	lat, lon := p.Lat(), p.Lon()
+
+	if lat < -90.0 || lat > 90.0 {
+		return errors.New("latitude value should be in range [-90.0, 90.0]")
+	}
+
+	if lon < -180.0 || lon >= 180.0 {
+		return errors.New("longitude value should be in range [-180.0, 180.0)")
+	}
+
+	return nil
 }
