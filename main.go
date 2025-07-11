@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/loganstk/hello-http/handler"
 	"github.com/nats-io/nats.go"
@@ -39,7 +38,7 @@ func main() {
 		http.ListenAndServe(":8080", nil)
 	case "consumer":
 		slog.Info("Starting NATS stream consumer...")
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		js, _ := jetstream.New(nc)
